@@ -11,7 +11,7 @@ from ... import schema as oai
 from ...utils import PythonIdentifier
 from ..errors import ParseError, PropertyError
 from .protocol import PropertyProtocol, Value
-from .schemas import Schemas
+from .schemas import ReferencePath, Schemas, get_reference_simple_name, parse_reference_path
 
 
 @define
@@ -25,6 +25,8 @@ class UnionProperty(PropertyProtocol):
     description: str | None
     example: str | None
     inner_properties: list[PropertyProtocol]
+    discriminator_property_name: str | None = None
+    discriminator_mapping: dict[str, PropertyProtocol] | None = None
     template: ClassVar[str] = "union_property.py.jinja"
 
     @classmethod
@@ -62,6 +64,7 @@ class UnionProperty(PropertyProtocol):
             for _type in data.type:
                 type_list_data.append(data.model_copy(update={"type": _type, "default": None}))
 
+        sub_properties_by_ref_path: dict[ReferencePath, PropertyProtocol] = {}
         for i, sub_prop_data in enumerate(chain(data.anyOf, data.oneOf, type_list_data)):
             # If a schema has a unique title property, we can use that to carry forward a descriptive name instead of "type_0"
             subscript: str
@@ -87,7 +90,13 @@ class UnionProperty(PropertyProtocol):
                     PropertyError(detail=f"Invalid property in union {name}", data=sub_prop_data),
                     schemas,
                 )
-            sub_properties.append(sub_prop)
+            sub_property = cast(PropertyProtocol, sub_prop)
+            if isinstance(sub_prop_data, oai.Reference):
+                ref_path = parse_reference_path(sub_prop_data.ref)
+                if isinstance(ref_path, ParseError):
+                    return PropertyError(detail=ref_path.detail, data=sub_prop_data), schemas
+                sub_properties_by_ref_path[ref_path] = sub_property
+            sub_properties.append(sub_property)
 
         def flatten_union_properties(possibly_nested: list[PropertyProtocol]) -> Iterator[PropertyProtocol]:
             for to_flatten in possibly_nested:
@@ -104,11 +113,17 @@ class UnionProperty(PropertyProtocol):
                 seen_types.add(type_string)
                 inner_properties.append(flattened)
 
+        discriminator_mapping = _get_discriminator_mapping(data, sub_properties_by_ref_path)
+        if isinstance(discriminator_mapping, PropertyError):
+            return discriminator_mapping, schemas
+
         prop = UnionProperty(
             name=name,
             required=required,
             default=None,
             inner_properties=inner_properties,
+            discriminator_property_name=data.discriminator.propertyName if data.discriminator is not None else None,
+            discriminator_mapping=discriminator_mapping,
             python_name=PythonIdentifier(value=name, prefix=config.field_prefix),
             description=data.description,
             example=data.example,
@@ -214,3 +229,27 @@ class UnionProperty(PropertyProtocol):
             if evolve(cast(Property, inner_prop), required=self.required).validate_location(location) is not None:
                 return ParseError(detail=f"{self.get_type_string()} is not allowed in {location}")
         return None
+
+
+def _get_discriminator_mapping(
+    data: oai.Schema, sub_properties_by_ref_path: dict[ReferencePath, PropertyProtocol]
+) -> dict[str, PropertyProtocol] | None | PropertyError:
+    if data.discriminator is None:
+        return None
+
+    if data.discriminator.mapping is None:
+        return {
+            get_reference_simple_name(ref_path): sub_prop for ref_path, sub_prop in sub_properties_by_ref_path.items()
+        }
+
+    discriminator_mapping: dict[str, PropertyProtocol] = {}
+    for discriminator_value, ref in data.discriminator.mapping.items():
+        ref_path = parse_reference_path(ref)
+        if isinstance(ref_path, ParseError):
+            return PropertyError(detail=ref_path.detail, data=data)
+
+        sub_prop = sub_properties_by_ref_path.get(ref_path)
+        if sub_prop is not None:
+            discriminator_mapping[discriminator_value] = sub_prop
+
+    return discriminator_mapping

@@ -144,3 +144,74 @@ class TestOneOf:
         assert_model_property_type_hint(
             ModelWithUnionOfOne, "required_thing", "ThingA"
         )
+
+
+@with_generated_client_fixture(
+"""
+components:
+  schemas:
+    NormalMember:
+      type: object
+      properties:
+        type: { type: "string" }
+        name: { type: "string" }
+    CorpMember:
+      type: object
+      properties:
+        type: { type: "string" }
+        name: { type: "string" }
+    Member:
+      oneOf:
+        - $ref: "#/components/schemas/NormalMember"
+        - $ref: "#/components/schemas/CorpMember"
+      discriminator:
+        propertyName: "type"
+        mapping:
+          NormalMember: "#/components/schemas/NormalMember"
+          CorporateMember: "#/components/schemas/CorpMember"
+    AnyOfMember:
+      anyOf:
+        - $ref: "#/components/schemas/NormalMember"
+        - $ref: "#/components/schemas/CorpMember"
+      discriminator:
+        propertyName: "type"
+        mapping:
+          NormalMember: "#/components/schemas/NormalMember"
+          CorporateMember: "#/components/schemas/CorpMember"
+    Post:
+      type: object
+      properties:
+        author:
+          $ref: "#/components/schemas/Member"
+        anyOfAuthor:
+          $ref: "#/components/schemas/AnyOfMember"
+""")
+@with_generated_code_imports(
+    ".models.CorpMember",
+    ".models.Member",
+    ".models.NormalMember",
+    ".models.Post",
+)
+class TestDiscriminatedOneOf:
+    def test_uses_discriminator_mapping1(self, CorpMember, Post):
+        talk = Post.from_dict({"author": {"type": "CorporateMember", "name": "Kim"}})
+
+        assert talk.author == CorpMember(type_="CorporateMember", name="Kim")
+
+    def test_uses_discriminator_mapping2(self, NormalMember, Post):
+        talk = Post.from_dict({"author": {"type": "NormalMember", "name": "Kim"}})
+
+        assert talk.author == NormalMember(type_="NormalMember", name="Kim")
+
+    def test_uses_any_of_discriminator_mapping(self, CorpMember, Post):
+        post = Post.from_dict({"anyOfAuthor": {"type": "CorporateMember", "name": "Kim"}})
+
+        assert post.any_of_author == CorpMember(type_="CorporateMember", name="Kim")
+
+    def test_unknown_discriminator_value_fails(self, Post):
+        try:
+            Post.from_dict({"author": {"type": "CorpMember", "name": "Kim"}})
+        except ValueError as error:
+            assert "Unexpected discriminator value" in str(error)
+        else:
+            raise AssertionError("Expected unknown discriminator values to fail")

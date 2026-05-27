@@ -8,6 +8,18 @@ def _parse_{{ property.python_name }}(data: object) -> {{ property.get_type_stri
     if isinstance(data, Unset):
         return data
     {% endif %}
+    {% if property.discriminator_property_name and property.discriminator_mapping %}
+    if not isinstance(data, dict):
+        raise TypeError()
+    discriminator_value = data.get({{ property.discriminator_property_name | tojson }})
+    {% for mapped_value, inner_property in property.discriminator_mapping.items() %}
+    {% import "property_templates/" + inner_property.template as inner_template %}
+    if discriminator_value == {{ mapped_value | tojson }}:
+        {{ inner_template.construct(inner_property, "data") | indent(8) }}
+        return {{ inner_property.python_name }}
+    {% endfor %}
+    raise ValueError(f"Unexpected discriminator value: {discriminator_value!r}")
+    {% else %}
     {% set ns = namespace(contains_unmodified_properties = false) %}
     {% for inner_property in property.inner_properties %}
     {% import "property_templates/" + inner_property.template as inner_template %}
@@ -34,6 +46,7 @@ def _parse_{{ property.python_name }}(data: object) -> {{ property.get_type_stri
     {% endfor %}
     {% if ns.contains_unmodified_properties %}
     return cast({{ property.get_type_string() }}, data)
+    {% endif %}
     {% endif %}
 
 {{ property.python_name }} = _parse_{{ property.python_name }}({{ source }})

@@ -24,6 +24,9 @@ def _parse_{{ property.python_name }}(data: object) -> {{ property.get_type_stri
     {% for inner_property in property.inner_properties %}
     {% import "property_templates/" + inner_property.template as inner_template %}
         {% if not inner_template.construct %}
+            {% if inner_property.get_type_string(no_optional=True, json=True) == "None" %}
+                {% continue %}
+            {% endif %}
             {% set ns.contains_unmodified_properties = true %}
             {% continue %}
         {% endif %}

@@ -101,7 +101,10 @@ class UnionProperty(PropertyProtocol):
         def flatten_union_properties(possibly_nested: list[PropertyProtocol]) -> Iterator[PropertyProtocol]:
             for to_flatten in possibly_nested:
                 if isinstance(to_flatten, UnionProperty):
-                    yield from flatten_union_properties(to_flatten.inner_properties)
+                    if to_flatten.discriminator_mapping is not None:
+                        yield to_flatten
+                    else:
+                        yield from flatten_union_properties(to_flatten.inner_properties)
                 else:
                     yield to_flatten
 

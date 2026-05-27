@@ -185,9 +185,17 @@ components:
           $ref: "#/components/schemas/Member"
         anyOfAuthor:
           $ref: "#/components/schemas/AnyOfMember"
+    FeedEvent:
+      type: object
+      properties:
+        author:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/Member"
 """)
 @with_generated_code_imports(
     ".models.CorpMember",
+    ".models.FeedEvent",
     ".models.Member",
     ".models.NormalMember",
     ".models.Post",
@@ -207,6 +215,16 @@ class TestDiscriminatedOneOf:
         post = Post.from_dict({"anyOfAuthor": {"type": "CorporateMember", "name": "Kim"}})
 
         assert post.any_of_author == CorpMember(type_="CorporateMember", name="Kim")
+
+    def test_preserves_discriminator_for_nullable_ref_union(self, CorpMember, FeedEvent):
+        event = FeedEvent.from_dict({"author": {"type": "CorporateMember", "name": "Kim"}})
+
+        assert event.author == CorpMember(type_="CorporateMember", name="Kim")
+
+    def test_preserves_none_for_nullable_ref_union(self, FeedEvent):
+        event = FeedEvent.from_dict({"author": None})
+
+        assert event.author is None
 
     def test_unknown_discriminator_value_fails(self, Post):
         try:
